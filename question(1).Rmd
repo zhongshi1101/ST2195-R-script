@@ -1,0 +1,221 @@
+# Introduction
+- In this project, the 2009 ASA Statistical Computing and Graphics Dataset is used.
+-  Because the dataset is very large (contains the year between 1987 and 2008), 
+- I choose 2006, 2007 data as sub-dataset for the tasks.
+- This project mainly focus on 5 problems
+    1. When is the best time of day, day of the week, and time of year to fly to minimise delays?
+    2. Do older planes suffer more delays?
+    3. How does the number of people flying between different locations change over time?
+    4. Can you detect cascading failures as delays in one airport create delays in others?
+    5. Use the available variables to construct a model that predicts delays.
+- Library introduction
+    - pandas: process csv data
+    - numpy: process matrix
+    - matplotlib: data visualization
+    - sklearn: training prediction model
+# Data wrangling
+```{r}
+library("dplyr")
+library("readr")
+library("ggplot2")
+```
+- Load flight, plane, airport data
+
+```{r}
+flight_2007 = read_csv("./dataverse_files/2007.csv")
+flight_2006 = read_csv("./dataverse_files/2006.csv")
+flight = rbind(flight_2006, flight_2007)
+```
+```{r}
+airport = read_csv("./dataverse_files/airports.csv")
+```
+```{r}
+plane = read_csv("./dataverse_files/plane-data.csv")
+```
+
+# Question 1
+**When is the best time of day, day of the week, and time of year to fly to minimise delays?**
+- Join the flight data with the plain data on tailnum.
+- Get the hour of the day by dividing CRSDepTime with 100. Because the origin format is HHSS.
+- Group the delay according to 'day of month', 'day of week' and 'hour of day'. Calculate the delay mean, median and average.
+- Plot the delay and find the best time.
+- Use line plot and box plot to display the median and mean delay of different time.
+- We mainly focus on the median delay of different time.
+
+```{r}
+flight['CRSDepHourOfDay'] = (flight['CRSDepTime'] %/% 100)
+flight['DelayMin'] = flight['DepDelay'] / 60
+```
+
+```{r}
+dom_delay <- flight %>%
+  group_by(DayofMonth) %>%
+  summarize(depdelay_mean = mean(DepDelay, na.rm=TRUE), depdelay_median = median(DepDelay, na.rm=TRUE))
+dow_delay <- flight %>%
+  group_by(DayOfWeek) %>%
+  summarize(depdelay_mean = mean(DepDelay, na.rm=TRUE), depdelay_median = median(DepDelay, na.rm=TRUE))
+hod_delay <- flight %>%
+  group_by(CRSDepHourOfDay) %>%
+  summarize(depdelay_mean = mean(DepDelay, na.rm=TRUE), depdelay_median = median(DepDelay, na.rm=TRUE))
+```
+
+```{r}
+ggplot(dom_delay) +
+  geom_line(aes(x = DayofMonth, y = depdelay_mean, color='mean')) +
+  geom_line(aes(x = DayofMonth, y = depdelay_median, color='median'))
+```
+
+```{r}
+ggplot(dow_delay) +
+  geom_line(aes(x = DayOfWeek, y = depdelay_mean, color='mean')) +
+  geom_line(aes(x = DayOfWeek, y = depdelay_median, color='median'))
+```
+
+```{r}
+ggplot(hod_delay) +
+  geom_line(aes(x = CRSDepHourOfDay, y = depdelay_mean, color='mean')) +
+  geom_line(aes(x = CRSDepHourOfDay, y = depdelay_median, color='median'))
+```
+
+- As shown in the figure, we mainly focus on the median dep_delay group by time.
+- Best time of day is: 5 o'clock, because 5 o'clock has least maximum delay value and lower average delay.
+- Best day of week is: 2 because week 2 wih lower median and average delay.
+- Best day of month is: 6, 8, 9. All of them has least maximum delay value and lower average and median delay. But the difference between them cannot be shown from the box plot.
+
+# Question2
+**Do older planes suffer more delays?**
+- Import the plane data and drop NA values
+- Join the plane data and the flight data on 'tailnum' column
+- Group the delay according to the plane's 'year' column, calculate the delay's mean, average and median.
+- Plot the delay and the year with line plot, find if there exists a relationship that older planes suffer more delays.
+
+```{r}
+plane = read_csv('./dataverse_files/plane-data.csv')
+
+flight_plane = merge(x=flight, y=plane, by.x='TailNum', by.y='tailnum')
+```
+```{r}
+plane_delay <- flight_plane %>%
+  group_by(year) %>%
+    summarize(depdelay_mean = mean(DepDelay, na.rm=TRUE), depdelay_median = median(DepDelay, na.rm=TRUE))
+```
+
+```{r}
+ggplot(plane_delay) + 
+  geom_line(aes(x=year, y=depdelay_mean, group=1, color='Mean')) +
+  geom_point(aes(x=year, y=depdelay_mean, group=1)) +
+  geom_line(aes(x=year, y=depdelay_median, group=1, color='Median')) +
+  geom_point(aes(x=year, y=depdelay_median, group=1)) + 
+  scale_x_discrete(guide = guide_axis(angle = 90))
+
+```
+- As shown in the figure, we mainly focus on the mean dep_delay group by plane's issue year.
+- There are no clearly relation between manufacturing year and mean dep_delay time. So older planes do not suffer more delays.
+
+# Question3
+**How does the number of people flying between different locations change over time?**
+    Find the locations with top-5 flight number and find the change of the number of people according to months (line plot).
+    - First combine the origin and destination with the same order, for example, treat (BOS,LGA) and (LGA, BOS) as the same key.
+    - Group the data with the origin dest tuple and sort with the count.
+    - Get the top-5 origin dest tuple
+    - Plot the change of those locations and find the relationship 
+    
+```{r}
+flight <- flight %>%
+  mutate(SortedOriginDest = case_when(
+    Origin > Dest ~ paste(Dest, ',', Origin),
+    Origin <= Dest ~ paste(Origin, ',',Dest)
+    ))
+
+N = 5
+max_n = flight %>%
+  group_by(SortedOriginDest) %>%
+  summarize(cnt = n())
+max_n = max_n[order(-max_n$cnt),]
+max_n = head(max_n, N)
+max_n_OD = max_n['SortedOriginDest']
+```
+
+```{r}
+flight_od <- filter(flight, SortedOriginDest %in% max_n_OD$SortedOriginDest)
+flight_od <- flight_od %>% 
+  group_by(SortedOriginDest, Month) %>%
+  summarize(cnt = n())
+```
+
+```{r}
+ggplot(flight_od) + 
+  geom_line(aes(x=Month, y=cnt, group=SortedOriginDest, color=SortedOriginDest)) +
+  geom_point(aes(x=Month, y=cnt, group=SortedOriginDest, color=SortedOriginDest))
+```
+- In this approach, I have choose the top-5 flight, group by both direction of the Origin and Destination city.
+- For example, flight with direction (HNL, OGG) and (OGG, HNL) are count as the same 'locations'.
+- As shown in the figure, for the flight with dest or origin of HNL, Feburary has least people flying and July has most people flying.
+- All location has a decrease in February and an increase in March.
+- People flying in summer is more than people flying in winter.
+# Question4
+**Can you detect cascading failures as delays in one airport create delays in others?**
+- Group the flight data by the time and destination attribute. 
+- Aggegrate the mean and median value of the departure delay attribute.
+- Join the flight according to the destination and origin attribute within the same day.
+    - For example, one flight from LA to DC will join with another record from DC to another place on the same day.
+- Because the data is too large, I only choose the data in 2006, Jan
+- Calculate the ratio between the destination and origin's departure delay, if the ratio is steady and close to 1.
+- Use the scatter plot to plot the ratio and time in different airports.
+
+```{r}
+flight_delay <- flight %>% filter(DepDelay > 0)
+flight_delay <- flight_delay %>% filter(Year==2006)
+flight_delay <- flight_delay %>% filter(Month==1)
+flight_sub_dest_grouped = flight_delay %>% 
+  group_by(Year, Month, DayofMonth, Dest) %>%
+  summarize(depdelay_mean = mean(DepDelay, na.rm=TRUE), depdelay_median = median(DepDelay, na.rm=TRUE))
+flight_sub_orig_grouped = flight_delay %>% 
+  group_by(Year, Month, DayofMonth, Origin) %>%
+  summarize(depdelay_mean = mean(DepDelay, na.rm=TRUE), depdelay_median = median(DepDelay, na.rm=TRUE))
+flight_sub_joined = merge(x=flight_sub_dest_grouped, y=flight_sub_orig_grouped, 
+                          by.x=c("Year", 'Month', 'DayofMonth', 'Dest'),
+                          by.y=c("Year", 'Month', 'DayofMonth', 'Origin'))
+```
+```{r}
+flight_sub_joined['ratio'] = flight_sub_joined['depdelay_median.x'] / flight_sub_joined['depdelay_median.y']
+```
+
+```{r}
+flight_sub_joined <- flight_sub_joined %>% filter(ratio < 2)
+ggplot(flight_sub_joined, aes(x = DayofMonth, y = ratio)) +
+  geom_point()
+```
+
+- As shown in the figure, the ratio of the origin and destination delay does not have clearly relationship, the ratio is not close to 1.
+- So there is no cascading failures as delays in one airport create delays in others.
+
+# Question5
+**Use the available variables to construct a model that predicts delays.**
+- Divide the dataset into two groups: delay and no delay
+- Join the flight data with the airport, with both origin and destination airport info.
+- Choose time, distance and location as attribute
+    - "Year", "Month", "DayOfWeek", "CRSDepTime", "CRSArrTime", "CRSElapsedTime", "Distance", "lat_x", "long_x", "lat_y", "long_y"
+- Downsample the data with 20000 items, because the origin dataset is too large.
+- Divide the dataset into train and test with 7 : 3 ratio.
+- Train the model of random forest
+- Get the test result
+
+```{r}
+airport = read_csv('./dataverse_files/airports.csv')
+sampled_flight = flight[sample(nrow(flight), 20000), ]
+flight_ori_airport = merge(sampled_flight, airport, by.x='Origin', by.y='iata')
+flight_src_airport = merge(flight_ori_airport, airport, by.x='Dest', by.y='iata')
+flight_src_airport['delay'] = flight_src_airport['ActualElapsedTime'] - flight_src_airport['CRSElapsedTime']
+```
+```{r}
+flightds =  flight_src_airport %>% select("Year", "Month", "DayOfWeek", "CRSDepTime", "CRSArrTime", "CRSElapsedTime", "Distance", 'delay', "lat.x", "long.x", "lat.y", "long.y")
+flightds <- flightds %>%
+  mutate(is_delay = case_when(
+    delay > 0 ~ 1,
+    delay <= 0 ~ 0
+    ))
+```
+```{r}
+library(randomForest)
+```
